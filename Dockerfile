@@ -25,6 +25,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends --only-upgrade -y \
+        libcap2=1:2.75-10+deb13u1+b1 \
+        libsystemd0=257.13-1~deb13u1 \
+        libudev1=257.13-1~deb13u1 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system app \
     && adduser --system --ingroup app --home /app appuser
 

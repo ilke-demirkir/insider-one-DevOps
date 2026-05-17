@@ -303,3 +303,18 @@ uses: aquasecurity/trivy-action@v0.35.0
 
 Bunun sebebi, güvenlik taraması yapan aracın kendisinin de supply chain riskinin parçası olabilmesi. Bu yüzden floating branch
 ya da eski tag yerine güvenli olduğu belirtilen sabit versiyon kullanıldı.
+
+İlk image scan sonucunda dört adet HIGH seviye bulgu gördüm. Bunları iki seviyede düzelttim:
+
+- Python tarafında FastAPI `0.136.1` ve Starlette `0.49.1` sürümlerine geçildi.
+- Docker runtime image içinde Debian paketleri güncellendi: `libcap2`, `libsystemd0`, `libudev1`.
+
+Rebuild sonrasında image içindeki versiyonları doğruladım:
+
+```text
+libcap2:arm64      1:2.75-10+deb13u1+b1
+libsystemd0:arm64  257.13-1~deb13u1
+libudev1:arm64     257.13-1~deb13u1
+fastapi==0.136.1
+starlette==0.49.1
+```
