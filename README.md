@@ -269,8 +269,8 @@ ulaştığını doğruluyor. Daha önceki `8080` port-forward doğrudan app Serv
 akışa dahil edildi.
 
 Gün 3 --
-CI/CD akışını supply chain kontrolleriyle genişlettim. `.github/workflows/ci.yaml` artık pull request, `main` push ve `v*.*.*`
-tag push eventlerinde çalışıyor.
+CI/CD akışını supply chain kontrolleriyle genişlettim. `.github/workflows/ci.yaml` artık pull request, `main` push, `v*.*.*`
+tag push ve manuel release workflow eventlerinde çalışıyor.
 
 Pull request akışında:
 
@@ -285,15 +285,19 @@ Pull request akışında:
 - Image `ghcr.io/ilke-demirkir/insiderone-devops-app` altına push ediliyor.
 - Image tag'leri Git SHA bazlı ve `latest` olarak üretiliyor.
 
-Release için ilk versiyonu manuel tag ile oluşturacağım:
+Release için manuel Git tag komutu yerine GitHub Actions içinden `workflow_dispatch` kullanıyorum. Actions ekranından `CI`
+workflow'u seçilip `Run workflow` ile `version` alanına örneğin `v0.1.0` giriliyor.
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+Bu manuel release akışı:
 
-`v0.1.0` tag'i push edildiğinde CI aynı test, secret scan, build ve Trivy scan adımlarını çalıştıracak; ardından image'i GHCR'a
-`v0.1.0` ve SHA tag'leriyle push edecek ve GitHub Release oluşturacak.
+- Testleri çalıştırır.
+- Secret scan ve Trivy image scan adımlarını çalıştırır.
+- Image'i GHCR'a SHA tag'i ve release tag'i ile push eder.
+- Git tag'i oluşturup remote'a push eder.
+- GitHub Release oluşturur.
+
+Tag formatını `vMAJOR.MINOR.PATCH` ile sınırladım; örneğin `v0.1.0`. Dışarıdan elle tag push edilirse de `v*.*.*` tag event'i
+aynı release job'ını çalıştırmaya devam eder.
 
 Trivy tarafında özellikle sabit ve güvenli action versiyonu kullanmaya dikkat ettim:
 
