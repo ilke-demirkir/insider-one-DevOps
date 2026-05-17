@@ -1,7 +1,7 @@
 replicaCount: 2
 
 image:
-  repository: ghcr.io/OWNER/insiderone-devops-app
+  repository: ghcr.io/ilke-demirkir/insiderone-devops-app
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
