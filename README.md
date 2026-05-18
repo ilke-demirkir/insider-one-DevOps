@@ -114,7 +114,7 @@ helm rollback app <REVISION>
 Helm 4.2.0 ile `--rollback-on-failure` kullanımı, upgrade sırasında pod'lar sağlıklı hale gelmezse Helm'in önceki başarılı
 release'e otomatik dönmesini sağlar. Bu flag aynı zamanda wait davranışını da aktif eder.
 
-Gün 2 --
+## Gün 2 --
 Minikube üzerinde ilk Helm deploy denemesini yaptım. Önce local Docker imajını oluşturdum, sonra imajı minikube içine yükledim:
 
 ```bash
@@ -268,7 +268,7 @@ Bu test, trafiğin ingress-nginx controller üzerinden Ingress rule'a, oradan Ku
 ulaştığını doğruluyor. Daha önceki `8080` port-forward doğrudan app Service'e gidiyordu; `8081` testinde ise Ingress katmanı da
 akışa dahil edildi.
 
-Gün 3 --
+## Gün 3 --
 CI/CD akışını supply chain kontrolleriyle genişlettim. `.github/workflows/ci.yaml` artık pull request, `main` push, `v*.*.*`
 tag push ve manuel release workflow eventlerinde çalışıyor.
 
@@ -321,4 +321,88 @@ libsystemd0:arm64  257.13-1~deb13u1
 libudev1:arm64     257.13-1~deb13u1
 fastapi==0.136.1
 starlette==0.49.1
+```
+
+Gün 4'e geçmeden önce AWS Track A tarafı için minimal IaC iskeletini ekledim. `infra/aws` altında Terraform/OpenTofu dosyaları
+EC2 instance, Elastic IP ve security group tanımlıyor. Security group iki girişi özellikle ayırıyor:
+
+- SSH sadece benim public IP adresimden gelecek şekilde `ssh_allowed_cidr` ile sınırlandırılıyor.
+- Uygulama için Helm prod values içinde tanımlı `30080` NodePort dışarı açılıyor.
+
+Örnek değişken dosyası:
+
+```bash
+cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars
+```
+
+`infra/aws/terraform.tfvars` içinde en az şu iki değeri değiştirmek gerekiyor:
+
+```hcl
+ssh_key_name     = "aws-keypair-name"
+ssh_allowed_cidr = "x.x.x.x/32"
+```
+
+Plan ve apply:
+
+```bash
+cd infra/aws
+terraform init
+terraform plan
+terraform apply
+```
+
+Terraform apply sonrası EC2 instance ve Elastic IP başarıyla oluştu. Oluşan output'taki SSH komutunu `.pem` dosyam ile kullanarak
+instance'a bağlanabildim:
+
+```bash
+ssh -i ~/.ssh/<key-file>.pem ubuntu@<Elastic-IP>
+```
+
+Bu checkpoint ile AWS tarafında EC2 host, security group, Elastic IP ve SSH erişimi doğrulanmış oldu. Bundan sonraki adım aynı
+host üzerinde `user-data.sh` ile kurulan minikube ortamının hazır olduğunu kontrol etmek ve release image'ini Helm prod values ile
+deploy etmek.
+
+Terraform/OpenTofu local state dosyaları ve gerçek `terraform.tfvars` dosyası `.gitignore` içine alındı; repo'ya sadece örnek
+tfvars dosyası giriyor.
+
+EC2 ilk açıldığında `user-data.sh` Docker, kubectl, minikube ve Helm kurulumlarını yapıyor ve minikube'u Docker driver ile başlatıyor.
+Helm özellikle `v4.2.0` olarak kuruluyor; sebebi localde kullandığım `--rollback-on-failure` flag'inin Helm 4 davranışı olması.
+Default instance tipi `t3.small` olduğu için bootstrap script'i minikube'u `1800mb` memory ile başlatıyor ve küçük bir swap file
+oluşturuyor. Daha yüksek kaynak için `t3.medium` gibi bir instance tipi seçilebilir.
+
+Eğer minikube ayakta görünmüyorsa ilk bakılacak yer cloud-init çıktısı:
+
+```bash
+sudo tail -n 100 /var/log/cloud-init-output.log
+```
+
+Instance hazır olduktan sonra Terraform output'unda görünen SSH komutuyla bağlanıp repoyu klonlamak gerekiyor:
+
+```bash
+git clone https://github.com/ilke-demirkir/insider-one-DevOps.git
+cd insider-one-DevOps
+```
+
+Sonra release image'i deploy edilebilir:
+
+```bash
+helm upgrade --install app ./chart/insiderone-devops-app \
+  -f chart/insiderone-devops-app/values-prod.yaml \
+  --set image.tag=v0.1.0 \
+  --set config.gitSha=<release-sha> \
+  --rollback-on-failure \
+  --timeout 3m
+```
+
+Prod values dosyasında Service tipi `NodePort`, port ise `30080`. Bu yüzden public test URL'i şu formatta olacak:
+
+```text
+http://<Elastic-IP>:30080/ping
+```
+
+AWS kaynakları ücret yazmaması için test bittikten sonra kapatılmalı:
+
+```bash
+cd infra/aws
+terraform destroy
 ```

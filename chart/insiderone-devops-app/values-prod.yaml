@@ -5,6 +5,12 @@ image:
   tag: "0.1.0"
   pullPolicy: IfNotPresent
 
+service:
+  type: NodePort
+  port: 80
+  targetPort: 8000
+  nodePort: 30080
+
 ingress:
   enabled: true
   className: nginx
