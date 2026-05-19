@@ -82,6 +82,17 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 80
 
+alerts:
+  enabled: true
+  labels:
+    release: monitoring
+  rules:
+    highErrorRate:
+      enabled: true
+      for: 2m
+      severity: warning
+      threshold: 0
+
 nodeSelector: {}
 
 tolerations: []

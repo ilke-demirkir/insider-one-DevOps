@@ -484,6 +484,65 @@ Operasyon dokümanları da eklendi:
 - `SECURITY.md`: secret yönetimi, CI security kontrolleri, container hardening ve credential rotation notları.
 - `docs/adr`: FastAPI, Helm, AWS EC2/minikube ve supply chain karar kayıtları.
 
+Monitoring stack için `kube-prometheus-stack` Helm chart'ını `monitoring` namespace'i altında kurdum:
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace
+```
+
+Kurulum sonrası tüm monitoring pod'ları Running durumda:
+
+```text
+NAME                                                     READY   STATUS    RESTARTS   AGE
+alertmanager-monitoring-kube-prometheus-alertmanager-0   2/2     Running   0          68s
+monitoring-grafana-5948d86fbd-66j8r                      3/3     Running   0          73s
+monitoring-kube-prometheus-operator-797dd746d4-lvzk7     1/1     Running   0          73s
+monitoring-kube-state-metrics-5957bd45bc-rdmld           1/1     Running   0          73s
+monitoring-prometheus-node-exporter-wr7zx                1/1     Running   0          73s
+prometheus-monitoring-kube-prometheus-prometheus-0       2/2     Running   0          67s
+```
+
+Bu checkpoint ile Prometheus, Grafana, Alertmanager, kube-state-metrics ve node-exporter bileşenlerinin minikube üzerinde sağlıklı
+şekilde çalıştığını doğrulamış oldum.
+
+Uygulama chart'ına `PrometheusRule` template'i ekledim. Alert kuralı, son 5 dakika içinde 5xx response görülürse uyarı üretmek
+üzere tanımlı:
+
+```promql
+sum(rate(http_requests_total{status=~"5.."}[5m])) > 0
+```
+
+Rule'un Prometheus Operator tarafından alınması için `release: monitoring` label'ı kullanılıyor. Chart render kontrolü:
+
+```bash
+helm lint ./chart/insiderone-devops-app
+helm template app ./chart/insiderone-devops-app -f chart/insiderone-devops-app/values-prod.yaml
+```
+
+Cluster'a uygulamak için app release'i tekrar upgrade edilir:
+
+```bash
+helm upgrade --install app ./chart/insiderone-devops-app \
+  -f chart/insiderone-devops-app/values-prod.yaml \
+  --set image.tag=v0.2.0 \
+  --set config.appVersion=0.2.0 \
+  --set config.gitSha=<release-sha> \
+  --rollback-on-failure \
+  --timeout 3m
+```
+
+Alert rule doğrulama:
+
+```bash
+kubectl get prometheusrule
+kubectl describe prometheusrule app-insiderone-devops-app
+```
+
 AWS kaynakları ücret yazmaması için test bittikten sonra kapatılmalı:
 
 ```bash
