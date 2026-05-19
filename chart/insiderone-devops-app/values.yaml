@@ -98,3 +98,10 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: monitoring
+  path: /metrics
+  interval: 30s
