@@ -26,3 +26,13 @@ def test_version_returns_version_and_sha():
     assert response.status_code == 200
     assert response.json()["version"]
     assert response.json()["sha"]
+
+
+def test_metrics_returns_prometheus_metrics():
+    client.get("/ping")
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "text/plain" in response.headers["content-type"]
+    assert "http_requests_total" in response.text

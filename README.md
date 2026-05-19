@@ -400,6 +400,90 @@ Prod values dosyasında Service tipi `NodePort`, port ise `30080`. Bu yüzden pu
 http://<Elastic-IP>:30080/ping
 ```
 
+EC2 üzerinde Helm deploy başarılı şekilde çalıştı:
+
+```bash
+helm upgrade --install app ./chart/insiderone-devops-app \
+  -f chart/insiderone-devops-app/values-prod.yaml \
+  --set image.tag=v0.1.0 \
+  --set config.gitSha=local \
+  --rollback-on-failure \
+  --timeout 3m
+```
+
+Pod'lar healthy ve rollout başarılıydı:
+
+```text
+app-insiderone-devops-app-5574f4cc75-qvwqs   1/1   Running   0
+app-insiderone-devops-app-5574f4cc75-tvcgk   1/1   Running   0
+deployment "app-insiderone-devops-app" successfully rolled out
+```
+
+Minikube node IP üzerinden EC2 içinde test edildiğinde app cevap verdi:
+
+```bash
+curl http://$(minikube ip):30080/ping
+```
+
+Çıktı:
+
+```text
+"pong"
+```
+
+Docker driver ile çalışan minikube'da NodePort, EC2 host'un public network interface'inde otomatik olarak dinlemiyor. Bu yüzden
+public demo için EC2 üzerinde app Service'i public interface'e port-forward ettim:
+
+```bash
+kubectl port-forward --address 0.0.0.0 svc/app-insiderone-devops-app 30080:80
+```
+
+Sonrasında laptop üzerinden Elastic IP ile public erişim doğrulandı:
+
+```bash
+curl http://<Elastic-IP>:30080/ping
+```
+
+Çıktı:
+
+```text
+"pong"
+```
+
+Bu yöntem terminal açık kaldığı sürece public demo için yeterli. Daha kalıcı bir çözüm gerekirse aynı komut küçük bir `systemd`
+servisine taşınabilir veya minikube/Ingress için host-level reverse proxy kurulabilir.
+
+Gün 4 --
+Operability tarafı için uygulamaya yapılandırılmış JSON request logları ve Prometheus formatında `/metrics` endpoint'i ekledim.
+Her request için `request_id`, method, path, status ve duration bilgisi loglanıyor. `/metrics` tarafında request count ve latency
+metrikleri expose ediliyor.
+
+Local test:
+
+```bash
+pytest
+```
+
+Sonuç:
+
+```text
+4 passed
+```
+
+Kubernetes tarafında pod annotation'ları Prometheus scrape için eklendi:
+
+```yaml
+prometheus.io/scrape: "true"
+prometheus.io/path: /metrics
+prometheus.io/port: "8000"
+```
+
+Operasyon dokümanları da eklendi:
+
+- `RUNBOOK.md`: health check, log bakma, metrics, restart, rollback ve public demo adımları.
+- `SECURITY.md`: secret yönetimi, CI security kontrolleri, container hardening ve credential rotation notları.
+- `docs/adr`: FastAPI, Helm, AWS EC2/minikube ve supply chain karar kayıtları.
+
 AWS kaynakları ücret yazmaması için test bittikten sonra kapatılmalı:
 
 ```bash
