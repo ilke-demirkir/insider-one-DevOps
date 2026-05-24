@@ -2,5 +2,5 @@ apiVersion: v2
 name: insiderone-devops-app
 description: Helm chart for the InsiderOne DevOps FastAPI case study service
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.3.1
+appVersion: "0.3.1"

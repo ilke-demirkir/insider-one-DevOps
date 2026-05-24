@@ -543,6 +543,161 @@ kubectl get prometheusrule
 kubectl describe prometheusrule app-insiderone-devops-app
 ```
 
+Prometheus'un uygulamayı scrape etmesi için ayrıca `ServiceMonitor` template'i ekledim. ServiceMonitor oluşturuldu:
+
+```text
+NAME                        AGE
+app-insiderone-devops-app   54s
+```
+
+Prometheus API üzerinden app metriklerini sorguladım:
+
+```bash
+curl "http://localhost:9090/api/v1/query?query=http_requests_total"
+```
+
+Sonuç başarılı döndü ve `http_requests_total` metriği iki app pod'u için görünür hale geldi. Dönen seriler içinde `/healthz`,
+`/ping` ve `/version` path'leri, `default` namespace'i, `app-insiderone-devops-app` service'i ve pod isimleri yer alıyor:
+
+```text
+http_requests_total{path="/healthz", status="200", service="app-insiderone-devops-app", ...}
+http_requests_total{path="/ping", status="200", service="app-insiderone-devops-app", ...}
+http_requests_total{path="/version", status="200", service="app-insiderone-devops-app", ...}
+```
+
+Bu checkpoint ile sadece `/metrics` endpoint'inin çalıştığını değil, Prometheus'un Kubernetes içinden uygulamayı gerçekten scrape
+ettiğini de doğrulamış oldum.
+
+Grafana dashboard tarafında uygulama için küçük ve odaklı bir dashboard hazırladım. Dashboard JSON'u repo içinde tutuluyor:
+
+```text
+docs/grafana-dashboard.json
+```
+
+Dashboard, Prometheus datasource'u üzerinden şu panelleri gösteriyor:
+
+- Request Rate: `http_requests_total` üzerinden path ve status bazlı RPS.
+- Latency p95: `http_request_duration_seconds_bucket` üzerinden p95 latency.
+- Error Ratio: 4xx/5xx isteklerin toplam isteklere oranı.
+- Pod Restarts: `kube_pod_container_status_restarts_total` üzerinden app pod restart sayısı.
+
+Dashboard Grafana API ile import edildi:
+
+```bash
+curl -u admin:<grafana-password> \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:3001/api/dashboards/db \
+  -d @docs/grafana-dashboard.json
+```
+
+Grafana ekran görüntüsü için kullanılan dashboard:
+
+```text
+http://127.0.0.1:3001/d/insiderone-app-observability/insiderone-app-observability?orgId=1&from=now-30m&to=now
+```
+
+Dashboard'un boş kalmaması için uygulamaya kontrollü trafik ürettim:
+
+```bash
+for i in {1..240}; do
+  curl -fsS http://127.0.0.1:8080/ping >/dev/null
+  curl -fsS http://127.0.0.1:8080/healthz >/dev/null
+  curl -fsS http://127.0.0.1:8080/version >/dev/null
+  if (( i % 8 == 0 )); then
+    curl -s -o /dev/null http://127.0.0.1:8080/not-found
+  fi
+  sleep 0.04
+done
+```
+
+Prometheus sorgusunda app metrikleri görünür hale geldi:
+
+```text
+http_requests_total{path="/healthz", status="200", ...} 266
+http_requests_total{path="/ping", status="200", ...}    240
+http_requests_total{path="/version", status="200", ...} 240
+http_requests_total{path="/not-found", status="404", ...} 30
+```
+
+Aynı kontrol sırasında toplam request rate yaklaşık `1.35 req/s`, 4xx/5xx hata rate'i ise yaklaşık `0.02 req/s` olarak göründü.
+Bu değerler Grafana dashboard ekran görüntüsünde RPS ve error panelinin dolu görünmesi için yeterli oldu.
+
+Alert tarafında `InsiderOneAppHighErrorRate` kuralı Prometheus tarafından yüklendi:
+
+```text
+Alert: InsiderOneAppHighErrorRate
+Expr:  sum(rate(http_requests_total{status=~"5.."}[5m])) > 0
+For:   2m
+State: inactive
+```
+
+Kuralın `inactive` durumda olması beklenen sonuç: trafik testinde 404 ürettim fakat 5xx üretmedim. Böylece alert tanımlı ve
+Prometheus tarafından sağlıklı okunuyor, ama gerçek bir server error olmadığı için fire etmiyor.
+
+Mimari diyagramı da repo içine Mermaid formatında ekledim:
+
+```text
+docs/architecture.md
+```
+
+Diyagram; Public URL/port-forward, Kubernetes Service, FastAPI pod, `/metrics`, Prometheus, Grafana, Alertmanager ve
+`PrometheusRule` akışını tek yerde gösteriyor. Bu dosya README'den ayrı tutuldu, çünkü teslimatta mimari diyagramı bağımsız bir
+artefact olarak paylaşmak daha pratik oluyor.
+
+Final checkpoint olarak chart ve app versiyonunu `0.3.1` seviyesine taşıdım:
+
+```yaml
+version: 0.3.1
+appVersion: "0.3.1"
+```
+
+EC2 üzerindeki minikube ortamına son deploy şu komutla uygulandı:
+
+```bash
+helm upgrade --install app ./chart/insiderone-devops-app \
+  -f chart/insiderone-devops-app/values-prod.yaml \
+  --set image.tag=v0.3.1 \
+  --set config.appVersion=0.3.1 \
+  --set config.gitSha=$(git rev-parse --short HEAD) \
+  --rollback-on-failure \
+  --timeout 3m
+```
+
+Kurulum sonrası doğrulama için kullanılan komutlar:
+
+```bash
+kubectl get pods -A
+helm list -A
+helm history app
+kubectl rollout status deployment/app-insiderone-devops-app
+```
+
+Bu kontrollerde app pod'ları, ingress controller, Prometheus, Grafana ve Alertmanager bileşenleri Running durumda göründü.
+`helm history app` release geçmişini, `rollout status` ise son deployment'ın başarıyla tamamlandığını doğruladı.
+
+Public demo için EC2 üzerinde app service'i host network'e port-forward edildi:
+
+```bash
+kubectl port-forward --address 0.0.0.0 svc/app-insiderone-devops-app 30080:80
+```
+
+Laptop üzerinden public IP ile `/ping` endpoint'i doğrulandı:
+
+```bash
+curl http://54.76.70.155:30080/ping
+```
+
+Çıktı:
+
+```text
+"pong"
+```
+
+CI/CD tarafında manuel versiyon girişi korunurken otomatik patch version üretimi de eklendi. `main` branch'e push edildiğinde
+workflow en son `vMAJOR.MINOR.PATCH` tag'ini bulup patch değerini bir artırıyor, Docker image'ı bu tag ile push ediyor ve GitHub
+Release oluşturuyor. Manuel `workflow_dispatch` çalıştırılırsa verilen versiyon kullanılmaya devam ediyor; tag push senaryosu da
+mevcut tag'i release kaynağı olarak kullanıyor.
+
 AWS kaynakları ücret yazmaması için test bittikten sonra kapatılmalı:
 
 ```bash

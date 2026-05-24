@@ -22,6 +22,54 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/insiderone-devops-app
 
 jobs:
+  version:
+    name: Resolve release version
+    runs-on: ubuntu-latest
+
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="$INPUT_VERSION"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            RELEASE_TAG="${{ github.ref_name }}"
+          else
+            LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+            if [ -z "$LATEST_TAG" ]; then
+              LATEST_TAG="v0.0.0"
+            fi
+
+            VERSION="${LATEST_TAG#v}"
+            MAJOR="${VERSION%%.*}"
+            REST="${VERSION#*.}"
+            MINOR="${REST%%.*}"
+            PATCH="${VERSION##*.}"
+            RELEASE_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+
+          if ! echo "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH, got: $RELEASE_TAG"
+            exit 1
+          fi
+
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
   test:
     name: Python tests
     runs-on: ubuntu-latest
@@ -46,7 +94,9 @@ jobs:
   docker-build:
     name: Docker build, scan, and publish
     runs-on: ubuntu-latest
-    needs: test
+    needs:
+      - test
+      - version
 
     steps:
       - name: Check out repository
@@ -67,7 +117,7 @@ jobs:
           tags: |
             type=sha,prefix=sha-
             type=ref,event=tag
-            type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ needs.version.outputs.release_tag }},enable=${{ needs.version.outputs.release_tag != '' }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Set up Docker Buildx
@@ -109,8 +159,10 @@ jobs:
   release:
     name: GitHub release
     runs-on: ubuntu-latest
-    needs: docker-build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs:
+      - version
+      - docker-build
+    if: needs.version.outputs.release_tag != '' && github.event_name != 'pull_request'
     permissions:
       contents: write
 
@@ -121,21 +173,26 @@ jobs:
           fetch-depth: 0
 
       - name: Create release tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.ref_type != 'tag'
         env:
-          RELEASE_TAG: ${{ inputs.version }}
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
         run: |
-          if ! echo "$RELEASE_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Release tag must match vMAJOR.MINOR.PATCH, got: $RELEASE_TAG"
-            exit 1
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag "$RELEASE_TAG" "$GITHUB_SHA"
+          if git rev-parse "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $RELEASE_TAG already exists locally."
+          else
+            git tag "$RELEASE_TAG" "$GITHUB_SHA"
+          fi
           git push origin "$RELEASE_TAG"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
-        run: gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --generate-notes
+          RELEASE_TAG: ${{ needs.version.outputs.release_tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists."
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --generate-notes

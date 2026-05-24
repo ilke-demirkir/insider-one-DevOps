@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.1
+
+- Added Prometheus `ServiceMonitor` and `PrometheusRule` support to the Helm chart.
+- Added Grafana dashboard JSON for request rate, latency p95, error ratio, and pod restarts.
+- Added architecture diagram documentation for the public URL, Kubernetes, app, and observability flow.
+- Verified the public EC2 demo through `http://54.76.70.155:30080/ping`.
+- Updated chart metadata to `0.3.1`.
+- Added automatic patch version resolution to the CI pipeline while keeping manual release dispatch support.
+
 ## v0.1.0
 
 - Added minimal FastAPI service with `/ping`, `/healthz`, and `/version` endpoints.
