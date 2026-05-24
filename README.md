@@ -1,6 +1,89 @@
 Projenin kod kısmı minimal olduğu için burayı biraz günlük gibi kullanıp, gün gün yaptıklarımı dokümante etmeye karar verdim.
 Elbette endpointler ile ilgili ve uygulamanın infrastructure'ı ile bilgileri de bunun sonunda paylaşıyor olacağım.
 
+## Reviewer Quickstart
+
+Projeyi hızlıca doğrulamak için ana komutlar aşağıdaki gibi. Daha detaylı kararlar, hata denemeleri ve checkpoint çıktıları alt
+bölümlerde gün gün dokümante edildi.
+
+### Local test
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+pytest
+```
+
+### Docker build
+
+```bash
+docker build -t insiderone-devops-app:local .
+```
+
+### Helm deploy
+
+Minikube veya EC2 üzerindeki minikube context'i aktifken:
+
+```bash
+helm upgrade --install app ./chart/insiderone-devops-app \
+  -f chart/insiderone-devops-app/values-prod.yaml \
+  --set image.tag=v0.3.1 \
+  --set config.appVersion=0.3.1 \
+  --set config.gitSha=$(git rev-parse --short HEAD) \
+  --rollback-on-failure \
+  --timeout 3m
+```
+
+### Verify
+
+```bash
+kubectl get pods -A
+helm list -A
+helm history app
+kubectl rollout status deployment/app-insiderone-devops-app
+```
+
+### Public demo
+
+EC2 üzerinde public demo için app service'i host network'e port-forward edilir:
+
+```bash
+kubectl port-forward --address 0.0.0.0 svc/app-insiderone-devops-app 30080:80
+```
+
+Bu terminal açıkken laptop üzerinden:
+
+```bash
+curl http://54.76.70.155:30080/ping
+```
+
+Beklenen çıktı:
+
+```text
+"pong"
+```
+
+### Observability
+
+Monitoring stack:
+
+```bash
+helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring \
+  --create-namespace
+```
+
+Grafana dashboard ve alert rule kanıtları:
+
+```text
+docs/grafana-dashboard.json
+docs/architecture.md
+```
+
+Grafana dashboard adı: `InsiderOne App Observability`.
+Prometheus alert adı: `InsiderOneAppHighErrorRate`.
+
 ## Gün 0 -- 15 Mayıs sunumun yapıldığı ve case studylerin atıldığı gün
 
 Daha önce AWS ile deployment deneyimim vardı, dolayısıyla AWS kullanmayı tercih ettim. Benzer şekilde Docker'a da aşina olsam da
